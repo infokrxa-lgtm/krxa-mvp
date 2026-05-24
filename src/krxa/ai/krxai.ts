@@ -1,3 +1,16 @@
+if (
+  input?.context?.event?.mode === "DISCUSSION" ||
+  input?.context?.event?.requestType === "discussion"
+) {
+  return {
+    type: "CALL_LLM",
+    reason: "DISCUSSION 모드 → LLM 호출",
+    confidence: 0.95,
+    risk_level: "low",
+    llm_request_type: "discussion",
+    recommended_actions: [],
+  }
+}
 export class KRXAI {
   decide({ context, memory }: any) {
     const best = memory?.[0]
