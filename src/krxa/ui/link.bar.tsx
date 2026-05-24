@@ -4,28 +4,52 @@ import { useMemo, useState } from "react"
 
 type Mode = "QUICK" | "ANALYZE" | "DISCUSSION" | "AUTO"
 
-async function sendKRXAEvent(event: any) {
-  const res = await fetch("/api/krxa/event", {
+async function sendLLMDirect(event: {
+  sessionId: string
+  mode: Mode
+  text: string
+}) {
+  const res = await fetch("/api/llm", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(event),
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      sessionId: event.sessionId,
+      mode: event.mode,
+      messages: [
+        {
+          role: "system",
+          content:
+            "너는 KRXA 내부 논의 파트너다. 사용자의 말을 받아 직접 답한다. KRXAI가 막혀도 사용자의 의도를 우선 이해하고, 필요한 경우 현재 Render/KRXA 연결 상태를 설명한다.",
+        },
+        {
+          role: "user",
+          content: event.text,
+        },
+      ],
+    }),
   })
 
-  return res.json()
+  const data = await res.json()
+
+  if (!res.ok) {
+    throw new Error(
+      data?.message ?? data?.error ?? `LLM_DIRECT_ERROR_${res.status}`
+    )
+  }
+
+  return data
 }
 
-function pickKRXAResponse(result: any) {
+function pickLLMResponse(data: any) {
   return (
-    result?.result?.response ??
-    result?.result?.message ??
-    result?.result?.text ??
-    result?.result?.answer ??
-    result?.result?.reason ??
-    result?.decision?.response ??
-    result?.decision?.reason ??
-    result?.policy?.reason ??
-    result?.error ??
-    "KRXA 응답 없음"
+    data?.response ??
+    data?.choices?.[0]?.message?.content ??
+    data?.message ??
+    data?.text ??
+    data?.answer ??
+    "LLM 응답 없음"
   )
 }
 
@@ -44,39 +68,16 @@ export function KRXALinkBar() {
     []
   )
 
-  async function connectKRXA(action = "link_bar_clicked", requestType: Mode = mode) {
+  async function connectKRXA() {
     setOpen(true)
-    setLoading(true)
 
-    try {
-      const result = await sendKRXAEvent({
-        source: "KRXA_LINK_BAR",
-        action,
-        mode,
-        llmMode: "LIMITED",
-        requestType,
-        screen: window.location.pathname,
-        sessionId,
-      })
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: pickKRXAResponse(result),
-        },
-      ])
-    } catch (error: any) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: error?.message ?? "KRXA 호출 실패",
-        },
-      ])
-    } finally {
-      setLoading(false)
-    }
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        text: "KRXA LINK 준비됨. 이제 직접 LLM 호출 모드로 연결합니다.",
+      },
+    ])
   }
 
   async function sendMessage() {
@@ -84,16 +85,41 @@ export function KRXALinkBar() {
 
     const text = input
     setInput("")
+    setLoading(true)
 
     setMessages((prev) => [...prev, { role: "user", text }])
 
-    await connectKRXA(text, "DISCUSSION")
+    try {
+      const data = await sendLLMDirect({
+        sessionId,
+        mode,
+        text,
+      })
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: pickLLMResponse(data),
+        },
+      ])
+    } catch (error: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: error?.message ?? "LLM 직접 호출 실패",
+        },
+      ])
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (!open) {
     return (
       <button
-        onClick={() => connectKRXA()}
+        onClick={connectKRXA}
         className="fixed bottom-6 right-6 rounded-full shadow-lg px-4 py-3 bg-black text-white z-50"
       >
         ⚡ KRXA
@@ -127,14 +153,17 @@ export function KRXALinkBar() {
 
       <div className="flex-1 p-3 overflow-y-auto text-sm space-y-2">
         {messages.map((msg, i) => (
-          <div key={i} className={msg.role === "user" ? "text-right" : "text-left"}>
-            <span className="inline-block bg-gray-100 rounded-lg px-3 py-2">
+          <div
+            key={i}
+            className={msg.role === "user" ? "text-right" : "text-left"}
+          >
+            <span className="inline-block bg-gray-100 rounded-lg px-3 py-2 whitespace-pre-wrap">
               {msg.text}
             </span>
           </div>
         ))}
 
-        {loading && <div className="text-gray-400">KRXA 판단 중...</div>}
+        {loading && <div className="text-gray-400">LLM 호출 중...</div>}
       </div>
 
       <div className="p-3 border-t flex gap-2">
@@ -143,7 +172,7 @@ export function KRXALinkBar() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          placeholder="KRXA와 논의..."
+          placeholder="나와 직접 논의..."
         />
         <button
           onClick={sendMessage}
