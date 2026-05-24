@@ -68,6 +68,11 @@ export function KRXALinkBar() {
     []
   )
 
+  function openDiscussionWindow() {
+    const url = `/krxa-discussion?sessionId=${sessionId}`
+    window.open(url, "_blank", "width=1100,height=850")
+  }
+
   async function connectKRXA() {
     setOpen(true)
 
@@ -75,7 +80,7 @@ export function KRXALinkBar() {
       ...prev,
       {
         role: "assistant",
-        text: "KRXA LINK 준비됨. 이제 직접 LLM 호출 모드로 연결합니다.",
+        text: "KRXA LINK 준비됨. 직접 LLM 호출 모드로 연결합니다.",
       },
     ])
   }
@@ -134,7 +139,17 @@ export function KRXALinkBar() {
           <div className="font-bold">KRXA LINK</div>
           <div className="text-xs text-gray-500">MODE: {mode}</div>
         </div>
-        <button onClick={() => setOpen(false)}>×</button>
+
+        <div className="flex gap-2">
+          <button
+            onClick={openDiscussionWindow}
+            className="px-2 py-1 text-xs rounded bg-blue-600 text-white"
+          >
+            OPEN
+          </button>
+
+          <button onClick={() => setOpen(false)}>×</button>
+        </div>
       </div>
 
       <div className="p-2 border-b flex gap-2 text-xs">
