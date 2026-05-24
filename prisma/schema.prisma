@@ -1,0 +1,50 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model KRXAConfig {
+  id           String   @id @default("default")
+  llm_mode     String
+  auto_mode    String
+  cost_mode    String
+  policy_level String
+  updated_at   DateTime @updatedAt
+}
+
+model MemoryRecord {
+  id              String   @id @default(uuid())
+  state           String
+  intent          String?
+  retry           Int?
+  context_summary String
+  response        String
+  actions_json    String
+  source          String
+  confidence      Float
+  success         Boolean?
+  user_feedback   String?
+  usage_count     Int      @default(0)
+  success_score   Int      @default(0)
+  last_used       DateTime?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+}
+
+model KRXALog {
+  id              String   @id @default(uuid())
+  timestamp       DateTime @default(now())
+  session_id      String
+  user_id         String?
+  type            String
+  level           String
+  state           String?
+  action          String?
+  decision_source String?
+  message         String
+  payload_json    String?
+}
