@@ -1,15 +1,19 @@
 "use client"
 
-import { useState } from "react"
-import { useSearchParams } from "next/navigation"
+export const dynamic = "force-dynamic"
+
+import { useEffect, useState } from "react"
 
 export default function KRXADiscussionPage() {
-  const params = useSearchParams()
-  const sessionId = params.get("sessionId") ?? "discussion-session"
-
+  const [sessionId, setSessionId] = useState("discussion-session")
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    setSessionId(params.get("sessionId") ?? "discussion-session")
+  }, [])
 
   async function sendMessage() {
     if (!input.trim()) return
@@ -43,17 +47,28 @@ export default function KRXADiscussionPage() {
 
       const data = await res.json()
 
+      if (!res.ok) {
+        throw new Error(
+          data?.message ?? data?.error ?? `LLM_API_ERROR_${res.status}`
+        )
+      }
+
       const reply =
         data?.response ??
         data?.choices?.[0]?.message?.content ??
         data?.message ??
+        data?.text ??
+        data?.answer ??
         "응답 없음"
 
       setMessages((prev) => [...prev, { role: "assistant", text: reply }])
     } catch (error: any) {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: error?.message ?? "LLM 호출 실패" },
+        {
+          role: "assistant",
+          text: error?.message ?? "LLM 호출 실패",
+        },
       ])
     } finally {
       setLoading(false)
