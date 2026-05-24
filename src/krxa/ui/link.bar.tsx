@@ -1,63 +1,88 @@
 "use client"
 
-export const dynamic = "force-dynamic"
+import { useMemo, useState } from "react"
 
-import { useEffect, useRef, useState } from "react"
+type Mode = "QUICK" | "ANALYZE" | "DISCUSSION" | "AUTO"
 
-type Msg = {
-  role: "user" | "assistant" | "system"
+async function sendLLMDirect(event: {
+  sessionId: string
+  mode: Mode
   text: string
+}) {
+  const res = await fetch("/api/llm", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      sessionId: event.sessionId,
+      mode: event.mode,
+      messages: [
+        {
+          role: "system",
+          content:
+            "너는 KRXA 내부 논의 파트너다. 사용자의 말을 받아 직접 답한다. KRXAI가 막혀도 사용자의 의도를 우선 이해하고, 필요한 경우 현재 Render/KRXA 연결 상태를 설명한다.",
+        },
+        {
+          role: "user",
+          content: event.text,
+        },
+      ],
+    }),
+  })
+
+  const data = await res.json()
+
+  if (!res.ok) {
+    throw new Error(
+      data?.message ?? data?.error ?? `LLM_DIRECT_ERROR_${res.status}`
+    )
+  }
+
+  return data
 }
 
-export default function KRXADiscussionPage() {
-  const [sessionId, setSessionId] = useState("discussion-session")
+function pickLLMResponse(data: any) {
+  return (
+    data?.response ??
+    data?.choices?.[0]?.message?.content ??
+    data?.message ??
+    data?.text ??
+    data?.answer ??
+    "LLM 응답 없음"
+  )
+}
+
+export function KRXALinkBar() {
+  const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<Mode>("AUTO")
   const [input, setInput] = useState("")
-  const [messages, setMessages] = useState<Msg[]>([
-    {
-      role: "system",
-      text: "KRXA DISCUSSION WINDOW 준비됨. @gpt 로 직접 호출 가능.",
-    },
-  ])
+  const [messages, setMessages] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-  const fileRef = useRef<HTMLInputElement | null>(null)
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    setSessionId(params.get("sessionId") ?? "discussion-session")
-  }, [])
+  const sessionId = useMemo(
+    () =>
+      typeof crypto !== "undefined"
+        ? crypto.randomUUID()
+        : String(Date.now()),
+    []
+  )
 
-  async function callGPT(text: string) {
-    const res = await fetch("/api/llm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId,
-        mode: "DISCUSSION",
-        messages: [
-          {
-            role: "system",
-            content:
-              "너는 KRXA 내부 논의 파트너다. KRXA는 최상위 운영 체계이고, KRXAI는 내부 판단/학습 엔진이며, 말대말 UI는 하위 제품/서비스 UI다. 사용자의 질문에 직접 답하고, 필요하면 KRXAI를 가르칠 수 있도록 구조적으로 정리한다.",
-          },
-          { role: "user", content: text },
-        ],
-      }),
-    })
+  function openDiscussionWindow() {
+    const url = `/krxa-discussion?sessionId=${sessionId}`
+    window.open(url, "_blank", "width=1100,height=850")
+  }
 
-    const data = await res.json()
+  async function connectKRXA() {
+    setOpen(true)
 
-    if (!res.ok) {
-      throw new Error(data?.message ?? data?.error ?? "LLM 호출 실패")
-    }
-
-    return (
-      data?.response ??
-      data?.choices?.[0]?.message?.content ??
-      data?.message ??
-      data?.text ??
-      data?.answer ??
-      "응답 없음"
-    )
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        text: "KRXA LINK 준비됨. 직접 LLM 호출 모드로 연결합니다.",
+      },
+    ])
   }
 
   async function sendMessage() {
@@ -66,145 +91,113 @@ export default function KRXADiscussionPage() {
     const text = input
     setInput("")
     setLoading(true)
+
     setMessages((prev) => [...prev, { role: "user", text }])
 
     try {
-      const reply = await callGPT(text)
-      setMessages((prev) => [...prev, { role: "assistant", text: reply }])
+      const data = await sendLLMDirect({
+        sessionId,
+        mode,
+        text,
+      })
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          text: pickLLMResponse(data),
+        },
+      ])
     } catch (error: any) {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: error?.message ?? "호출 실패" },
+        {
+          role: "assistant",
+          text: error?.message ?? "LLM 직접 호출 실패",
+        },
       ])
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    const text = await file.text().catch(() => "")
-    const summary = text
-      ? `파일 업로드됨: ${file.name}\n\n${text.slice(0, 5000)}`
-      : `파일 업로드됨: ${file.name}\n\n텍스트로 읽을 수 없는 파일입니다.`
-
-    setMessages((prev) => [...prev, { role: "user", text: summary }])
-    setInput(`@gpt 업로드한 파일 ${file.name} 내용을 KRXA 관점에서 분석해줘.`)
-  }
-
-  function downloadChat() {
-    const content = messages
-      .map((m) => `[${m.role.toUpperCase()}]\n${m.text}`)
-      .join("\n\n---\n\n")
-
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" })
-    const url = URL.createObjectURL(blob)
-
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `krxa-discussion-${sessionId}.txt`
-    a.click()
-
-    URL.revokeObjectURL(url)
-  }
-
-  function clearChat() {
-    setMessages([
-      {
-        role: "system",
-        text: "KRXA DISCUSSION WINDOW 초기화됨.",
-      },
-    ])
+  if (!open) {
+    return (
+      <button
+        onClick={connectKRXA}
+        className="fixed bottom-6 right-6 rounded-full shadow-lg px-4 py-3 bg-black text-white z-50"
+      >
+        ⚡ KRXA
+      </button>
+    )
   }
 
   return (
-    <main className="w-full h-screen bg-[#f3f4f6] flex items-center justify-center p-4">
-      <div className="w-full max-w-6xl h-[92vh] bg-white border shadow-2xl rounded-2xl overflow-hidden flex flex-col">
-        <header className="h-12 bg-black text-white flex items-center justify-between px-4">
-          <div>
-            <div className="font-bold">KRXA DISCUSSION WINDOW</div>
-            <div className="text-xs text-gray-300">Session: {sessionId}</div>
-          </div>
+    <div className="fixed bottom-6 right-6 w-80 h-96 bg-white border shadow-xl rounded-2xl flex flex-col overflow-hidden z-50">
+      <div className="p-3 border-b flex justify-between items-center">
+        <div>
+          <div className="font-bold">KRXA LINK</div>
+          <div className="text-xs text-gray-500">MODE: {mode}</div>
+        </div>
 
-          <div className="flex gap-2 text-xs">
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="px-3 py-1 rounded bg-white text-black"
-            >
-              파일 업로드
-            </button>
-
-            <button
-              onClick={downloadChat}
-              className="px-3 py-1 rounded bg-white text-black"
-            >
-              대화 다운로드
-            </button>
-
-            <button
-              onClick={clearChat}
-              className="px-3 py-1 rounded bg-red-600 text-white"
-            >
-              초기화
-            </button>
-          </div>
-
-          <input
-            ref={fileRef}
-            type="file"
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-        </header>
-
-        <section className="flex-1 overflow-y-auto p-6 space-y-4">
-          {messages.map((msg, index) => (
-            <div
-              key={index}
-              className={
-                msg.role === "user"
-                  ? "text-right"
-                  : msg.role === "system"
-                  ? "text-center"
-                  : "text-left"
-              }
-            >
-              <div
-                className={`inline-block max-w-4xl rounded-xl px-4 py-3 whitespace-pre-wrap text-sm leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-black text-white"
-                    : msg.role === "system"
-                    ? "bg-yellow-100 text-gray-700"
-                    : "bg-gray-100 text-gray-900"
-                }`}
-              >
-                {msg.text}
-              </div>
-            </div>
-          ))}
-
-          {loading && <div className="text-gray-400">LLM 호출 중...</div>}
-        </section>
-
-        <footer className="p-4 border-t bg-white flex gap-2">
-          <input
-            className="flex-1 border rounded-xl px-4 py-3 text-sm"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-            placeholder="@gpt KRXA 내부 논의 파트너를 호출..."
-          />
-
+        <div className="flex gap-2">
           <button
-            onClick={sendMessage}
-            className="px-6 py-3 bg-black text-white rounded-xl"
+            onClick={openDiscussionWindow}
+            className="px-2 py-1 text-xs rounded bg-blue-600 text-white"
           >
-            전송
+            OPEN
           </button>
-        </footer>
+
+          <button onClick={() => setOpen(false)}>×</button>
+        </div>
       </div>
-    </main>
+
+      <div className="p-2 border-b flex gap-2 text-xs">
+        {(["QUICK", "ANALYZE", "DISCUSSION", "AUTO"] as Mode[]).map((m) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={`px-2 py-1 rounded ${
+              mode === m ? "bg-black text-white" : "bg-gray-100"
+            }`}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 p-3 overflow-y-auto text-sm space-y-2">
+        {messages.map((msg, i) => (
+          <div
+            key={i}
+            className={msg.role === "user" ? "text-right" : "text-left"}
+          >
+            <span className="inline-block bg-gray-100 rounded-lg px-3 py-2 whitespace-pre-wrap">
+              {msg.text}
+            </span>
+          </div>
+        ))}
+
+        {loading && <div className="text-gray-400">LLM 호출 중...</div>}
+      </div>
+
+      <div className="p-3 border-t flex gap-2">
+        <input
+          className="flex-1 border rounded px-2 py-1 text-sm"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+          placeholder="나와 직접 논의..."
+        />
+        <button
+          onClick={sendMessage}
+          className="px-3 py-1 bg-black text-white rounded"
+        >
+          전송
+        </button>
+      </div>
+    </div>
   )
 }
+
+export { KRXALinkBar as KRXLinkBar }
