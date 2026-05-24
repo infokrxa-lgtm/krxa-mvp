@@ -23,26 +23,123 @@ export class KRXAEngine {
 
   async handleEvent(event: any, config?: any) {
     const state = this.stateMachine.update(event)
-    const context = this.contextEngine.build({ state, event, config })
-    await this.logger.write({ session_id: context.session.session_id, type: "CONTEXT_CREATED", level: "info", state: state.session_state, action: event.action, message: "Context 생성", payload: context })
+
+    const context = this.contextEngine.build({
+      state,
+      event,
+      config,
+    })
+
+    await this.logger.write({
+      session_id: context.session.session_id,
+      type: "CONTEXT_CREATED",
+      level: "info",
+      state: state.session_state,
+      action: event.action,
+      message: "Context 생성",
+      payload: context,
+    })
 
     const memory = await this.languageDB.search(context)
-    const decision = this.krxai.decide({ context, memory })
-    await this.logger.write({ session_id: context.session.session_id, type: "KRXAI_DECISION", level: "info", state: state.session_state, decision_source: "KRXAI", message: decision.reason, payload: decision })
+
+    const decision = this.krxai.decide({
+      context,
+      memory,
+    })
+
+    await this.logger.write({
+      session_id: context.session.session_id,
+      type: "KRXAI_DECISION",
+      level: "info",
+      state: state.session_state,
+      decision_source: "KRXAI",
+      message: decision.reason,
+      payload: decision,
+    })
 
     const policy = this.policyEngine.check(decision, context)
-    await this.logger.write({ session_id: context.session.session_id, type: policy.allowed ? "POLICY_CHECK" : "BLOCKED", level: policy.allowed ? "info" : "warn", state: state.session_state, decision_source: "POLICY", message: policy.reason, payload: policy })
-    if (!policy.allowed) return { status: "BLOCKED", context, decision, policy }
 
-    const result = decision.type === "CALL_LLM" ? await this.llmConnector.call({ context, decision }) : decision
-    if (decision.type === "CALL_LLM") await this.logger.write({ session_id: context.session.session_id, type: "LLM_CALL", level: result.fallback_used ? "warn" : "info", state: state.session_state, decision_source: "LLM", message: result.reason ?? "LLM 호출 완료", payload: result })
+    await this.logger.write({
+      session_id: context.session.session_id,
+      type: policy.allowed ? "POLICY_CHECK" : "BLOCKED",
+      level: policy.allowed ? "info" : "warn",
+      state: state.session_state,
+      decision_source: "POLICY",
+      message: policy.reason,
+      payload: policy,
+    })
 
-    const autoResult = await this.autoMode.run({ context, decision, result, policy })
-    await this.logger.write({ session_id: context.session.session_id, type: "AUTO_EXECUTE", level: autoResult.executed ? "info" : "warn", state: state.session_state, action: JSON.stringify(autoResult.action ?? []), decision_source: "KRXAI", message: autoResult.executed ? "자동 실행 완료" : autoResult.reason, payload: autoResult })
+    if (!policy.allowed) {
+      return {
+        status: "BLOCKED",
+        context,
+        decision,
+        policy,
+      }
+    }
 
-    const saved = await this.learningLoop.save({ context, decision, result, autoResult })
-    if (saved) await this.logger.write({ session_id: context.session.session_id, type: "LEARNING_SAVE", level: "info", state: state.session_state, message: "학습 기록 저장", payload: saved })
+    const result =
+      decision.type === "CALL_LLM"
+        ? await this.llmConnector.call({
+            context,
+            decision,
+          })
+        : decision
 
-    return { status: "DONE", context, decision, result, autoResult }
+    if (decision.type === "CALL_LLM") {
+      await this.logger.write({
+        session_id: context.session.session_id,
+        type: "LLM_CALL",
+        level: (result as any).fallback_used ? "warn" : "info",
+        state: state.session_state,
+        decision_source: "LLM",
+        message: (result as any).reason ?? "LLM 호출 완료",
+        payload: result,
+      })
+    }
+
+    const autoResult = await this.autoMode.run({
+      context,
+      decision,
+      result,
+      policy,
+    })
+
+    await this.logger.write({
+      session_id: context.session.session_id,
+      type: "AUTO_EXECUTE",
+      level: autoResult.executed ? "info" : "warn",
+      state: state.session_state,
+      action: JSON.stringify(autoResult.action ?? []),
+      decision_source: "KRXAI",
+      message: autoResult.executed ? "자동 실행 완료" : autoResult.reason,
+      payload: autoResult,
+    })
+
+    const saved = await this.learningLoop.save({
+      context,
+      decision,
+      result,
+      autoResult,
+    })
+
+    if (saved) {
+      await this.logger.write({
+        session_id: context.session.session_id,
+        type: "LEARNING_SAVE",
+        level: "info",
+        state: state.session_state,
+        message: "학습 기록 저장",
+        payload: saved,
+      })
+    }
+
+    return {
+      status: "DONE",
+      context,
+      decision,
+      result,
+      autoResult,
+    }
   }
 }
